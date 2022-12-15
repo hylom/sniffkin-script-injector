@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import path from 'path';
 import { SessionProcessorPlugin } from 'sniffkin-session-processor';
 import { HtmlSed } from 'html-sed';
 
@@ -13,10 +14,50 @@ export class ScriptInjectorPlugin extends SessionProcessorPlugin {
   constructor(option={}) {
     super(option);
     this.pluginName = 'ScriptInjectorPlugin';
+    this._scriptUrl = option.scriptUrl;
     this._script = option.script;
     this._scriptFilePath = option.scriptFilePath;
-    this._scriptName = option.scriptName || `${generateHash(option.script)}.js`;
-    
+    this._scriptName = option.scriptName;
+    this._scriptAsFile = false;
+  }
+
+  getScriptUrl(baseUrl) {
+    const scriptName = this.getScriptName();
+    if (scriptName) {
+      return `${baseUrl}${BASE_DIR}${scriptName}`;
+    } 
+    return '';
+  }
+
+  getScriptName() {
+    if (this._scriptName) {
+      return this._scriptName;
+    }
+    if (this._script) {
+      return `${generateHash(this._script)}.js`;
+    }
+    if (this._scriptFilePath) {
+      return path.basename(this._scriptFilePath);
+    }
+    return '';
+  }
+
+  getScriptTag(baseUrl) {
+    const result = [];
+    if (this._scriptUrl) {
+      result.push(`<script src="${this._scriptUrl}"></script>`);
+    }
+    if (this._scriptAsFile) {
+      const scriptUrl = this.getScriptUrl(baseUrl);
+      if (scriptUrl) {
+        result.push(`<script src="${scriptUrl}"></script>`);
+      }
+    } else {
+      if (this._script) {
+        result.push(`<script>${this._script}</script>`);
+      }
+    }
+    return result.join('\n');
   }
 
   init(context) {
@@ -26,15 +67,13 @@ export class ScriptInjectorPlugin extends SessionProcessorPlugin {
 
     context.web.use(BASE_DIR, this._serveScript.bind(this));
     context.web.addHandler('listen', () => {
-      const baseUrl = context.web.getHttpBaseUrl();
       const hsed = new HtmlSed();
-      const scriptUrl = `${baseUrl}${BASE_DIR}${this._scriptName}`;
-      const newSubStr = `$&<script src="${scriptUrl}"></script>`;
+      const newSubStr = `$&${this.getScriptTag(context.web.getHttpBaseUrl())}`;
       hsed.substitute(/^<\s*body(?:>|\s+.*>)/, newSubStr);
       this.setResponseFilter(hsed);
     });
 
-    this._logger.info(`ScriptInjectrorPlugin loaded. script path: ${BASE_DIR}${this._scriptName}`);
+    this._logger.info(`ScriptInjectrorPlugin loaded. script path: ${this.getScriptUrl('')}`);
   }
 
   conditionForRequest(clientRequest) {
@@ -54,7 +93,7 @@ export class ScriptInjectorPlugin extends SessionProcessorPlugin {
   }
 
   _serveScript(req, res, next) {
-    if (req.url != `/${this._scriptName}`) {
+    if (req.url != `/${this.getScriptName()}`) {
       next();
       return;
     }
